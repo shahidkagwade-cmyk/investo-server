@@ -1,45 +1,46 @@
 import express from "express";
 import cors from "cors";
-
 import withdrawRoutes from "./withdrawRoutes.js";
 import supabaseAdmin from "./supabaseAdmin.js";
 
 const app = express();
 
-/* ================= CORS (FINAL SAFE VERSION) ================= */
+/* ================= SAFE CORS ================= */
 const allowedOrigins = [
-  "https://investo-smart-growth-main.vercel.app", // user app
-  "https://investo-admin-panel-iota.vercel.app",  // admin panel
+  "https://investo-smart-growth-main.vercel.app", // USER APP
+  "https://investo-admin-panel-iota.vercel.app"   // ADMIN PANEL
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // allow server-to-server & Vercel internal calls
       if (!origin) return callback(null, true);
-
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-
-      return callback(new Error("Not allowed by CORS"));
+      return callback(new Error("CORS blocked"));
     },
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-admin-secret"],
-    credentials: true,
+    credentials: true
   })
 );
 
 app.options("*", cors());
-/* ============================================================= */
-
 app.use(express.json());
 
+/* ================= SUPABASE ADMIN ================= */
 app.use((req, _res, next) => {
   req.supabaseAdmin = supabaseAdmin;
   next();
 });
 
+/* ================= ROUTES ================= */
 app.use("/withdraw", withdrawRoutes);
+
+/* ================= HEALTH CHECK ================= */
+app.get("/", (_req, res) => {
+  res.json({ ok: true, service: "investo-server" });
+});
 
 export default app;
