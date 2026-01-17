@@ -5,40 +5,36 @@ import supabaseAdmin from "./supabaseAdmin.js";
 
 const app = express();
 
-/* ================= SAFE CORS ================= */
 const allowedOrigins = [
-  "https://investo-smart-growth-main.vercel.app", // USER APP
-  "https://investo-admin-panel-iota.vercel.app"   // ADMIN PANEL
+  "https://investo-smart-growth-main.vercel.app",
+  "https://investo-admin-panel-iota.vercel.app",
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS blocked"));
       }
-      return callback(new Error("CORS blocked"));
     },
+    credentials: true,
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-admin-secret"],
-    credentials: true
   })
 );
 
 app.options("*", cors());
 app.use(express.json());
 
-/* ================= SUPABASE ADMIN ================= */
 app.use((req, _res, next) => {
   req.supabaseAdmin = supabaseAdmin;
   next();
 });
 
-/* ================= ROUTES ================= */
 app.use("/withdraw", withdrawRoutes);
 
-/* ================= HEALTH CHECK ================= */
 app.get("/", (_req, res) => {
   res.json({ ok: true, service: "investo-server" });
 });
