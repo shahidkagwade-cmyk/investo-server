@@ -1,7 +1,9 @@
 import express from "express";
 import cors from "cors";
 import withdrawRoutes from "./withdrawRoutes.js";
+import adminWithdrawRoutes from "./routes/adminWithdrawRoutes.js";
 import supabaseAdmin from "./supabaseAdmin.js";
+import adminBonusRoutes from "./routes/adminBonusRoutes.js";
 
 const app = express();
 
@@ -33,7 +35,12 @@ app.use((req, _res, next) => {
   next();
 });
 
+/* USER withdraw */
 app.use("/withdraw", withdrawRoutes);
+
+/* ADMIN withdraw */
+app.use("/admin/withdrawals", adminWithdrawRoutes);
+app.use("/admin/bonus", adminBonusRoutes);
 
 app.get("/", (_req, res) => {
   res.json({ ok: true, service: "investo-server" });

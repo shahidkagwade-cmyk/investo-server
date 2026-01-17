@@ -2,27 +2,19 @@ import express from "express";
 
 const router = express.Router();
 
-/* ================= ADMIN AUTH ================= */
-router.use((req, res, next) => {
-  const secret = req.headers["x-admin-secret"];
-  if (!secret || secret !== process.env.ADMIN_SECRET) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  next();
-});
-
-/* ================= LIST WITHDRAWALS ================= */
-router.get("/list", async (req, res) => {
+/**
+ * GET pending / approved / rejected withdrawals
+ * /withdraw/admin/withdrawals?status=pending
+ */
+router.get("/withdrawals", async (req, res) => {
   try {
-    const status = req.query.status;
     const supabase = req.supabaseAdmin;
+    const status = req.query.status;
 
     let query = supabase
       .from("withdrawals")
-      .select(
-        `
+      .select(`
         id,
-        user_id,
         amount,
         currency,
         network,
@@ -30,8 +22,7 @@ router.get("/list", async (req, res) => {
         status,
         created_at,
         profiles ( email )
-      `
-      )
+      `)
       .order("created_at", { ascending: false });
 
     if (status && status !== "all") {
@@ -41,114 +32,91 @@ router.get("/list", async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    res.json({ withdrawals: data || [] });
-  } catch (e) {
-    console.error("LIST ERROR:", e);
-    res.status(500).json({ error: "Server error" });
+    const withdrawals = data.map(w => ({
+      id: w.id,
+      amount: w.amount,
+      currency: w.currency,
+      network: w.network,
+      wallet_address: w.wallet_address,
+      status: w.status,
+      created_at: w.created_at,
+      email: w.profiles?.email ?? null,
+    }));
+
+    res.json({ withdrawals });
+  } catch (err) {
+    console.error("ADMIN LIST ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch withdrawals" });
   }
 });
 
-/* ================= APPROVE (CUT BALANCE) ================= */
-router.post("/approve", async (req, res) => {
+/**
+ * APPROVE withdrawal
+ */
+router.post("/withdrawals/approve", async (req, res) => {
   try {
     const { withdrawal_id } = req.body;
     const supabase = req.supabaseAdmin;
 
-    const { data: wd, error } = await supabase
-      .from("withdrawals")
-      .select("*")
-      .eq("id", withdrawal_id)
-      .single();
-
-    if (error || !wd || wd.status !== "pending") {
-      return res.status(400).json({ error: "Invalid withdrawal" });
-    }
-
-    /* 1️⃣ GET PROFILE */
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("withdrawable_balance")
-      .eq("id", wd.user_id)
-      .single();
-
-    if (!profile) {
-      return res.status(400).json({ error: "Profile not found" });
-    }
-
-    const newBalance =
-      Number(profile.withdrawable_balance) - Number(wd.amount);
-
-    if (newBalance < 0) {
-      return res.status(400).json({ error: "Insufficient balance" });
-    }
-
-    /* 2️⃣ UPDATE BALANCE */
-    await supabase
-      .from("profiles")
-      .update({ withdrawable_balance: newBalance })
-      .eq("id", wd.user_id);
-
-    /* 3️⃣ MARK APPROVED */
     await supabase
       .from("withdrawals")
-      .update({
-        status: "approved",
-        processed_at: new Date().toISOString(),
-      })
+      .update({ status: "approved" })
       .eq("id", withdrawal_id);
 
     res.json({ ok: true });
-  } catch (e) {
-    console.error("APPROVE ERROR:", e);
-    res.status(500).json({ error: "Server error" });
+  } catch (err) {
+    console.error("APPROVE ERROR:", err);
+    res.status(500).json({ error: "Approve failed" });
   }
 });
 
-/* ================= REJECT (REFUND BALANCE) ================= */
-router.post("/reject", async (req, res) => {
+/**
+ * ❗ REJECT withdrawal (WITH REFUND)
+ */
+router.post("/withdrawals/reject", async (req, res) => {
   try {
     const { withdrawal_id } = req.body;
     const supabase = req.supabaseAdmin;
 
-    const { data: wd } = await supabase
+    // 1️⃣ Fetch withdrawal
+    const { data: withdrawal, error } = await supabase
       .from("withdrawals")
-      .select("*")
+      .select("id, user_id, amount, status")
       .eq("id", withdrawal_id)
       .single();
 
-    if (!wd || wd.status !== "pending") {
-      return res.status(400).json({ error: "Invalid withdrawal" });
+    if (error || !withdrawal)
+      return res.status(404).json({ error: "Withdrawal not found" });
+
+    if (withdrawal.status !== "pending")
+      return res.status(400).json({ error: "Already processed" });
+
+    // 2️⃣ REFUND using SQL increment (SAFE)
+    const { error: refundError } = await supabase.rpc(
+      "increment_withdrawable_balance",
+      {
+        uid: withdrawal.user_id,
+        amt: withdrawal.amount,
+      }
+    );
+
+    if (refundError) {
+      console.error("REFUND FAILED:", refundError);
+      return res.status(500).json({ error: "Refund failed" });
     }
 
-    /* 1️⃣ REFUND BALANCE */
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("withdrawable_balance")
-      .eq("id", wd.user_id)
-      .single();
-
-    const newBalance =
-      Number(profile.withdrawable_balance) + Number(wd.amount);
-
-    await supabase
-      .from("profiles")
-      .update({ withdrawable_balance: newBalance })
-      .eq("id", wd.user_id);
-
-    /* 2️⃣ MARK REJECTED */
+    // 3️⃣ Mark rejected
     await supabase
       .from("withdrawals")
-      .update({
-        status: "rejected",
-        processed_at: new Date().toISOString(),
-      })
+      .update({ status: "rejected" })
       .eq("id", withdrawal_id);
 
     res.json({ ok: true });
-  } catch (e) {
-    console.error("REJECT ERROR:", e);
-    res.status(500).json({ error: "Server error" });
+  } catch (err) {
+    console.error("REJECT ERROR:", err);
+    res.status(500).json({ error: "Reject failed" });
   }
 });
+
 
 export default router;

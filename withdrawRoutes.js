@@ -3,6 +3,9 @@ import jwt from "jsonwebtoken";
 
 const router = express.Router();
 
+/* =========================
+   USER WITHDRAW (POST)
+========================= */
 router.post("/", async (req, res) => {
   try {
     const auth = req.headers.authorization;
@@ -10,17 +13,17 @@ router.post("/", async (req, res) => {
 
     const token = auth.replace("Bearer ", "");
     const payload = jwt.decode(token);
-
     const userId = payload?.sub;
+
     if (!userId) return res.status(401).json({ error: "Invalid token" });
 
     const { amount, network, wallet_address } = req.body;
-    if (!amount || amount < 2)
+    if (!amount || amount < 2) {
       return res.status(400).json({ error: "Minimum $2" });
+    }
 
     const supabase = req.supabaseAdmin;
 
-    /* GET BALANCE */
     const { data: profile } = await supabase
       .from("profiles")
       .select("withdrawable_balance")
@@ -31,7 +34,6 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Insufficient balance" });
     }
 
-    /* INSERT WITHDRAW */
     await supabase.from("withdrawals").insert({
       user_id: userId,
       amount,
@@ -41,7 +43,6 @@ router.post("/", async (req, res) => {
       status: "pending",
     });
 
-    /* CUT BALANCE */
     await supabase
       .from("profiles")
       .update({
@@ -49,11 +50,85 @@ router.post("/", async (req, res) => {
       })
       .eq("id", userId);
 
-    return res.json({ ok: true });
+    res.json({ ok: true });
   } catch (err) {
     console.error("withdraw fatal:", err);
-    return res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: "Server error" });
   }
+});
+
+/* =========================
+   ADMIN – LIST WITHDRAWALS
+========================= */
+router.get("/admin/withdrawals", async (req, res) => {
+  try {
+    const { status } = req.query;
+    const supabase = req.supabaseAdmin;
+
+    let query = supabase
+      .from("withdrawals")
+      .select(`
+        id,
+        amount,
+        currency,
+        network,
+        wallet_address,
+        status,
+        created_at,
+        profiles(email)
+      `)
+      .order("created_at", { ascending: false });
+
+    if (status && status !== "all") {
+      query = query.eq("status", status);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    const withdrawals = data.map(w => ({
+      ...w,
+      email: w.profiles?.email || null,
+    }));
+
+    res.json({ withdrawals });
+  } catch (err) {
+    console.error("admin withdrawals error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/* =========================
+   ADMIN – APPROVE
+========================= */
+router.post("/admin/withdrawals/approve", async (req, res) => {
+  const { withdrawal_id } = req.body;
+  const supabase = req.supabaseAdmin;
+
+  await supabase
+    .from("withdrawals")
+    .update({ status: "approved" })
+    .eq("id", withdrawal_id);
+
+  res.json({ ok: true });
+});
+
+/* =========================
+   ADMIN – REJECT
+========================= */
+router.post("/admin/withdrawals/reject", async (req, res) => {
+  const { withdrawal_id } = req.body;
+  const supabase = req.supabaseAdmin;
+
+  await supabase
+    .from("withdrawals")
+    .update({ status: "rejected" })
+    .eq("id", withdrawal_id);
+
+  res.json({ ok: true });
 });
 
 export default router;
