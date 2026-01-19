@@ -7,6 +7,8 @@ import adminBonusRoutes from "./routes/adminBonusRoutes.js";
 import adminDepositRoutes from "./routes/adminDepositRoutes.js";
 import adminDailyClaimRoutes from "./routes/adminDailyClaimRoutes.js";
 import adminUsersRoutes from "./routes/adminUsersRoutes.js";
+import claimDailyRoutes from "./routes/claimDailyRoutes.js";
+
 
 const app = express();
 
@@ -47,6 +49,8 @@ app.use("/admin/bonus", adminBonusRoutes);
 app.use("/admin/deposits", adminDepositRoutes);
 app.use("/admin/daily-claim", adminDailyClaimRoutes);
 app.use("/admin", adminUsersRoutes);
+/* USER daily claim */
+app.use("/claim-daily", claimDailyRoutes);
 
 app.get("/", (_req, res) => {
   res.json({ ok: true, service: "investo-server" });
