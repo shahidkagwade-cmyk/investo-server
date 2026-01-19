@@ -5,6 +5,8 @@ import adminWithdrawRoutes from "./routes/adminWithdrawRoutes.js";
 import supabaseAdmin from "./supabaseAdmin.js";
 import adminBonusRoutes from "./routes/adminBonusRoutes.js";
 import adminDepositRoutes from "./routes/adminDepositRoutes.js";
+import adminDailyClaimRoutes from "./routes/adminDailyClaimRoutes.js";
+import adminUsersRoutes from "./routes/adminUsersRoutes.js";
 
 const app = express();
 
@@ -43,6 +45,8 @@ app.use("/withdraw", withdrawRoutes);
 app.use("/admin/withdrawals", adminWithdrawRoutes);
 app.use("/admin/bonus", adminBonusRoutes);
 app.use("/admin/deposits", adminDepositRoutes);
+app.use("/admin/daily-claim", adminDailyClaimRoutes);
+app.use("/admin", adminUsersRoutes);
 
 app.get("/", (_req, res) => {
   res.json({ ok: true, service: "investo-server" });

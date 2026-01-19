@@ -3,13 +3,10 @@ import supabase from "../supabaseAdmin.js";
 
 const router = express.Router();
 
-/**
- * POST /api/claim-daily
- * Body: { plan_id }
- */
+console.log("🔥 NEW CLAIM DAILY ROUTE ACTIVE 🔥");
+
 router.post("/claim-daily", async (req, res) => {
   try {
-    /* ================= AUTH ================= */
     const auth = req.headers.authorization;
     if (!auth) {
       return res.status(401).json({ ok: false, error: "No auth token" });
@@ -30,10 +27,10 @@ router.post("/claim-daily", async (req, res) => {
       return res.status(400).json({ ok: false, error: "plan_id required" });
     }
 
-    /* ================= FETCH PLAN ================= */
+    /* ===== FETCH PLAN ===== */
     const { data: plan, error: planErr } = await supabase
       .from("user_plans")
-      .select("id, daily_income, next_income_at")
+      .select("id, daily_income, activated_at, next_income_at")
       .eq("id", plan_id)
       .eq("user_id", userId)
       .single();
@@ -44,10 +41,30 @@ router.post("/claim-daily", async (req, res) => {
 
     const now = new Date();
 
+    /* ===== BLOCK FIRST 24 HOURS ===== */
+    if (!plan.activated_at) {
+      return res.status(400).json({
+        ok: false,
+        error: "Plan not activated yet",
+      });
+    }
+
+    const firstClaimTime = new Date(plan.activated_at);
+    firstClaimTime.setHours(firstClaimTime.getHours() + 24);
+
+    if (now < firstClaimTime) {
+      return res.status(400).json({
+        ok: false,
+        error: "First claim available after 24 hours",
+        next_claim_at: firstClaimTime.toISOString(),
+      });
+    }
+
+    /* ===== BLOCK MULTIPLE CLAIMS SAME DAY ===== */
     if (plan.next_income_at && new Date(plan.next_income_at) > now) {
       return res.status(400).json({
         ok: false,
-        error: "Already claimed. Come back later.",
+        error: "Already claimed today",
       });
     }
 
@@ -56,53 +73,31 @@ router.post("/claim-daily", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Invalid income amount" });
     }
 
-    /* ================= LOCK NEXT CLAIM ================= */
+    /* ===== SET NEXT CLAIM ===== */
     const next = new Date();
-    next.setDate(next.getDate() + 1);
+    next.setHours(next.getHours() + 24);
 
-    const { error: lockErr } = await supabase
+    await supabase
       .from("user_plans")
       .update({ next_income_at: next.toISOString() })
-      .eq("id", plan.id)
-      .eq("user_id", userId);
+      .eq("id", plan.id);
 
-    if (lockErr) {
-      return res.status(500).json({
-        ok: false,
-        error: "Failed to lock claim",
-      });
-    }
-
-    /* ================= ADD BALANCE ================= */
-    const { data: profile, error: profErr } = await supabase
+    /* ===== ADD BALANCE ===== */
+    const { data: profile } = await supabase
       .from("profiles")
       .select("withdrawable_balance")
       .eq("id", userId)
       .single();
 
-    if (profErr || !profile) {
-      return res.status(500).json({
-        ok: false,
-        error: "Profile not found",
-      });
-    }
-
     const newBalance =
       Number(profile.withdrawable_balance || 0) + amount;
 
-    const { error: balErr } = await supabase
+    await supabase
       .from("profiles")
       .update({ withdrawable_balance: newBalance })
       .eq("id", userId);
 
-    if (balErr) {
-      return res.status(500).json({
-        ok: false,
-        error: "Failed to update balance",
-      });
-    }
-
-    /* ================= LEDGER ================= */
+    /* ===== LEDGER ===== */
     await supabase.from("income_ledger").insert({
       user_id: userId,
       amount,
@@ -121,5 +116,6 @@ router.post("/claim-daily", async (req, res) => {
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
+
 
 export default router;

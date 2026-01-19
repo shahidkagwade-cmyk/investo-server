@@ -73,50 +73,60 @@ router.post("/withdrawals/approve", async (req, res) => {
 /**
  * ❗ REJECT withdrawal (WITH REFUND)
  */
+// adminWithdrawRoutes.js
 router.post("/withdrawals/reject", async (req, res) => {
   try {
-    const { withdrawal_id } = req.body;
+    console.log("REJECT HIT BODY:", req.body);
+
+    const { withdrawal_id } = req.body; // ✅ FIXED
     const supabase = req.supabaseAdmin;
 
-    // 1️⃣ Fetch withdrawal
-    const { data: withdrawal, error } = await supabase
+    if (!withdrawal_id) {
+      return res.status(400).json({ error: "withdrawal_id missing" });
+    }
+
+    const { data: withdrawal } = await supabase
       .from("withdrawals")
-      .select("id, user_id, amount, status")
+      .select("*")
       .eq("id", withdrawal_id)
       .single();
 
-    if (error || !withdrawal)
-      return res.status(404).json({ error: "Withdrawal not found" });
+    console.log("WITHDRAWAL:", withdrawal);
 
-    if (withdrawal.status !== "pending")
-      return res.status(400).json({ error: "Already processed" });
-
-    // 2️⃣ REFUND using SQL increment (SAFE)
-    const { error: refundError } = await supabase.rpc(
-      "increment_withdrawable_balance",
-      {
-        uid: withdrawal.user_id,
-        amt: withdrawal.amount,
-      }
-    );
-
-    if (refundError) {
-      console.error("REFUND FAILED:", refundError);
-      return res.status(500).json({ error: "Refund failed" });
+    if (!withdrawal || withdrawal.status !== "pending") {
+      return res.status(400).json({ error: "Invalid withdrawal" });
     }
 
-    // 3️⃣ Mark rejected
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("withdrawable_balance")
+      .eq("id", withdrawal.user_id)
+      .single();
+
+    console.log("PROFILE BEFORE:", profile.withdrawable_balance);
+
+    const newBalance =
+      Number(profile.withdrawable_balance) + Number(withdrawal.amount);
+
     await supabase
       .from("withdrawals")
       .update({ status: "rejected" })
       .eq("id", withdrawal_id);
 
-    res.json({ ok: true });
+    await supabase
+      .from("profiles")
+      .update({ withdrawable_balance: newBalance })
+      .eq("id", withdrawal.user_id);
+
+    console.log("PROFILE AFTER:", newBalance);
+
+    res.json({ success: true, new_balance: newBalance });
   } catch (err) {
     console.error("REJECT ERROR:", err);
     res.status(500).json({ error: "Reject failed" });
   }
 });
+
 
 
 export default router;
